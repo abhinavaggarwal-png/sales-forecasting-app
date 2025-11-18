@@ -1,0 +1,586 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import utils
+
+# Page configuration
+st.set_page_config(
+    page_title="Sales Forecasting Dashboard",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Custom CSS
+st.markdown("""
+    <style>
+    .main-header {
+        font-size: 2.5rem;
+        font-weight: bold;
+        color: #1f77b4;
+        text-align: center;
+        padding: 1rem 0;
+    }
+    .metric-card {
+        background-color: #f0f2f6;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        text-align: center;
+    }
+    .stMetric {
+        background-color: #ffffff;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+# Title
+st.markdown('<div class="main-header">🎯 Sales Forecasting Dashboard - November 2025</div>', 
+            unsafe_allow_html=True)
+st.markdown("---")
+
+
+# Initialize session state
+if 'data_loaded' not in st.session_state:
+    st.session_state.data_loaded = False
+if 'predictions_generated' not in st.session_state:
+    st.session_state.predictions_generated = False
+
+
+# Sidebar - Data Loading and Configuration
+with st.sidebar:
+    st.header("⚙️ Configuration")
+    
+    # Data upload option
+    data_source = st.radio(
+        "Data Source",
+        ["Use Default Path", "Upload CSV"],
+        help="Choose to use local file or upload data"
+    )
+    
+    if data_source == "Upload CSV":
+        uploaded_file = st.file_uploader("Upload all_data2.csv", type=['csv'])
+        if uploaded_file:
+            data_path = uploaded_file
+        else:
+            st.warning("Please upload data file")
+            data_path = None
+    else:
+        data_path = "data/all_data2.csv"
+        st.info("Using default path: data/all_data2.csv")
+    
+    # Load data button
+    if st.button("🔄 Load Data", type="primary", use_container_width=True):
+        if data_path:
+            with st.spinner("Loading data and models..."):
+                try:
+                    # Load data
+                    st.session_state.df_all = utils.load_data(data_path)
+                    st.session_state.model, st.session_state.scaler = utils.load_models()
+                    st.session_state.y_pred_oct = utils.load_predictions()
+                    st.session_state.sales_weights = utils.load_sales_weights()
+                    
+                    # Extract October and September data
+                    st.session_state.df_oct = st.session_state.df_all[
+                        st.session_state.df_all['month'] == '2025-10-01'
+                    ].copy()
+                    st.session_state.df_sep = st.session_state.df_all[
+                        st.session_state.df_all['month'] == '2025-09-01'
+                    ].copy()
+                    
+                    # Calculate confidence intervals
+                    std_error, ci_multipliers = utils.calculate_confidence_intervals(
+                        st.session_state.df_oct, 
+                        st.session_state.y_pred_oct
+                    )
+                    st.session_state.std_error = std_error
+                    st.session_state.ci_multipliers = ci_multipliers
+                    
+                    # Get feature importance
+                    st.session_state.feature_importance = utils.calculate_feature_importance(
+                        st.session_state.model
+                    )
+                    
+                    st.session_state.data_loaded = True
+                    st.success("✅ Data loaded successfully!")
+                    
+                except Exception as e:
+                    st.error(f"Error loading data: {str(e)}")
+        else:
+            st.error("Please provide data path")
+    
+    if st.session_state.data_loaded:
+        st.success(f"✅ Data Loaded")
+        st.metric("Total SKUs", st.session_state.df_oct['item_id'].nunique())
+        st.metric("Total Cities", st.session_state.df_oct['city_norm'].nunique())
+        st.metric("October WAPE", 
+                 f"{utils.wape(st.session_state.df_oct['monthly_qty_sold'], st.session_state.y_pred_oct):.2%}")
+
+
+# Main content
+if not st.session_state.data_loaded:
+    st.info("👈 Please load data from the sidebar to begin")
+    st.stop()
+
+
+# Input Controls
+st.header("🎮 Input Controls")
+
+col1, col2 = st.columns(2)
+
+with col1:
+    st.subheader("📉 Discount Strategy")
+    discount_change = st.slider(
+        "Discount % Change (from September baseline)",
+        min_value=-50,
+        max_value=100,
+        value=0,
+        step=5,
+        help="Adjust overall discount percentage. Positive = increase discount, Negative = decrease discount"
+    )
+    st.caption(f"**Change:** {discount_change:+d}%")
+
+with col2:
+    st.subheader("💰 Marketing Budget")
+    budget_change = st.slider(
+        "Budget % Change (from September baseline)",
+        min_value=-50,
+        max_value=200,
+        value=0,
+        step=10,
+        help="Adjust overall marketing budget. Positive = increase spend, Negative = decrease spend"
+    )
+    st.caption(f"**Change:** {budget_change:+d}%")
+
+
+# Advanced mode toggle
+with st.expander("🔧 Advanced: City x SKU Level Controls", expanded=False):
+    st.warning("⚠️ Advanced mode: Set individual controls for specific city-SKU combinations")
+    
+    # City and SKU selection
+    selected_city = st.selectbox(
+        "Select City",
+        options=sorted(st.session_state.df_oct['city_norm'].unique())
+    )
+    
+    filtered_skus = st.session_state.df_oct[
+        st.session_state.df_oct['city_norm'] == selected_city
+    ]['item_name'].unique()
+    
+    selected_sku = st.selectbox(
+        "Select SKU",
+        options=sorted(filtered_skus)
+    )
+    
+    col_adv1, col_adv2 = st.columns(2)
+    with col_adv1:
+        city_discount = st.number_input(
+            "Discount % Change for this City-SKU",
+            min_value=-50,
+            max_value=100,
+            value=discount_change,
+            step=5
+        )
+    
+    with col_adv2:
+        city_budget = st.number_input(
+            "Budget % Change for this City-SKU",
+            min_value=-50,
+            max_value=200,
+            value=budget_change,
+            step=10
+        )
+    
+    if st.button("Apply to Selected City-SKU"):
+        st.info("Advanced mode not fully implemented in this version. Using global controls.")
+
+
+# Generate Forecast Button
+st.markdown("---")
+if st.button("🚀 Generate November Forecast", type="primary", use_container_width=True):
+    with st.spinner("Generating forecast with confidence intervals..."):
+        try:
+            # Step 1: Update October data with user inputs (using September as baseline conceptually)
+            # But we apply changes to October data for November forecast
+            df_oct_updated = utils.update_features_with_inputs(
+                st.session_state.df_oct,
+                discount_change,
+                budget_change,
+                city_sku_changes=None,
+                sales_weights=st.session_state.sales_weights
+            )
+            
+            # Step 2: Prepare November features
+            df_nov = utils.prepare_november_features(
+                df_oct_updated,
+                st.session_state.df_oct
+            )
+            
+            # Step 3: Generate predictions with confidence intervals
+            budget_mult = 1 + (budget_change / 100)
+            predictions = utils.predict_with_confidence(
+                st.session_state.model,
+                st.session_state.scaler,
+                df_nov,
+                st.session_state.std_error,
+                st.session_state.ci_multipliers,
+                budget_multiplier=budget_mult
+            )
+            
+            # Step 4: Also get baseline predictions (no changes)
+            df_nov_baseline = utils.prepare_november_features(
+                st.session_state.df_oct,
+                st.session_state.df_oct
+            )
+            predictions_baseline = utils.predict_with_confidence(
+                st.session_state.model,
+                st.session_state.scaler,
+                df_nov_baseline,
+                st.session_state.std_error,
+                st.session_state.ci_multipliers,
+                budget_multiplier=1.0  # No change for baseline
+            )
+            
+            # Store results
+            st.session_state.df_nov = df_nov
+            st.session_state.predictions = predictions
+            st.session_state.predictions_baseline = predictions_baseline
+            st.session_state.predictions_generated = True
+            
+            st.success("✅ Forecast generated successfully!")
+            
+        except Exception as e:
+            st.error(f"Error generating forecast: {str(e)}")
+            st.exception(e)
+
+
+# Display Results
+if st.session_state.predictions_generated:
+    st.markdown("---")
+    st.header("📊 Forecast Results - November 2025")
+    
+    # Summary metrics
+    total_forecast = st.session_state.predictions['prediction'].sum()
+    total_baseline = st.session_state.predictions_baseline['prediction'].sum()
+    total_change = total_forecast - total_baseline
+    pct_change = (total_change / total_baseline) * 100 if total_baseline > 0 else 0
+    
+    col1, col2, col3, col4, col5 = st.columns(5)
+    
+    with col1:
+        st.metric(
+            "Baseline Forecast",
+            f"{total_baseline:,.0f}",
+            help="Forecast with no changes"
+        )
+    
+    with col2:
+        st.metric(
+            "Updated Forecast",
+            f"{total_forecast:,.0f}",
+            delta=f"{total_change:,.0f} ({pct_change:+.1f}%)",
+            help="Forecast with your input changes"
+        )
+    
+    with col3:
+        ci_50_l = st.session_state.predictions['ci_50_lower'].sum()
+        ci_50_u = st.session_state.predictions['ci_50_upper'].sum()
+        ci_50_compact = f"{ci_50_l/1000:.0f}K - {ci_50_u/1000:.0f}K"
+        st.metric(
+            "50% Confidence",
+            ci_50_compact,
+            help="50% chance actual result falls in this range"
+        )
+    
+    with col4:
+        ci_75_l = st.session_state.predictions['ci_75_lower'].sum()
+        ci_75_u = st.session_state.predictions['ci_75_upper'].sum()
+        ci_75_compact = f"{ci_75_l/1000:.0f}K - {ci_75_u/1000:.0f}K"
+        st.metric(
+            "75% Confidence",
+            ci_75_compact,
+            help="75% chance actual result falls in this range"
+        )
+
+    with col5:
+        ci_95_l = st.session_state.predictions['ci_95_lower'].sum()
+        ci_95_u = st.session_state.predictions['ci_95_upper'].sum()
+        ci_95_compact = f"{ci_95_l/1000:.0f}K - {ci_95_u/1000:.0f}K"
+        st.metric(
+            "95% Confidence",
+            ci_95_compact,
+            help="95% chance actual result falls in this range"
+        )
+        )
+
+    with col5:
+        ci_95_l = st.session_state.predictions['ci_95_lower'].sum()
+        ci_95_u = st.session_state.predictions['ci_95_upper'].sum()
+        ci_95_compact = f"{ci_95_l/1000:.0f}K - {ci_95_u/1000:.0f}K"
+        st.metric(
+            "95% Confidence",
+            ci_95_compact,
+            help="95% chance actual result falls in this range"
+        )
+        )
+    
+    # Add 75% CI below
+    st.info(f"""
+    **Confidence Intervals (Total Forecast):**
+    - 50% CI: {st.session_state.predictions['ci_50_lower'].sum():,.0f} to {st.session_state.predictions['ci_50_upper'].sum():,.0f}
+    - 75% CI: {st.session_state.predictions['ci_75_lower'].sum():,.0f} to {st.session_state.predictions['ci_75_upper'].sum():,.0f}
+    - 95% CI: {st.session_state.predictions['ci_95_lower'].sum():,.0f} to {st.session_state.predictions['ci_95_upper'].sum():,.0f}
+    
+    *Narrower ranges indicate higher forecast confidence*
+    """)
+    
+    st.markdown("---")
+    
+    # Tabs for different views
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "📍 City Analysis",
+        "📦 SKU Analysis", 
+        "🎯 Key Drivers",
+        "📈 Detailed Data"
+    ])
+    
+    with tab1:
+        st.subheader("City-wise Forecast")
+        
+        # Aggregate by city
+        city_results = utils.aggregate_results(
+            st.session_state.df_nov,
+            st.session_state.predictions,
+            group_by='city_norm'
+        )
+        
+        city_baseline = utils.aggregate_results(
+            st.session_state.df_nov,
+            st.session_state.predictions_baseline,
+            group_by='city_norm'
+        )
+        
+        city_results = city_results.merge(
+            city_baseline[['city_norm', 'prediction']],
+            on='city_norm',
+            suffixes=('', '_baseline')
+        )
+        
+        city_results['change'] = city_results['prediction'] - city_results['prediction_baseline']
+        city_results['change_pct'] = (city_results['change'] / city_results['prediction_baseline']) * 100
+        
+        # Top 10 cities chart
+        top_cities = city_results.nlargest(10, 'prediction')
+        
+        fig_cities = go.Figure()
+        fig_cities.add_trace(go.Bar(
+            x=top_cities['city_norm'],
+            y=top_cities['prediction_baseline'],
+            name='Baseline',
+            marker_color='lightblue'
+        ))
+        fig_cities.add_trace(go.Bar(
+            x=top_cities['city_norm'],
+            y=top_cities['prediction'],
+            name='Updated Forecast',
+            marker_color='darkblue'
+        ))
+        
+        fig_cities.update_layout(
+            title="Top 10 Cities by Forecast Volume",
+            xaxis_title="City",
+            yaxis_title="Forecasted Quantity",
+            barmode='group',
+            height=500
+        )
+        st.plotly_chart(fig_cities, use_container_width=True)
+        
+        # City table
+        st.subheader("All Cities - Detailed View")
+        city_display = city_results[['city_norm', 'prediction_baseline', 'prediction', 
+                                     'change', 'change_pct']].sort_values('prediction', ascending=False)
+        city_display.columns = ['City', 'Baseline', 'Updated Forecast', 'Change', 'Change %']
+        
+        st.dataframe(
+            city_display.style.format({
+                'Baseline': '{:,.0f}',
+                'Updated Forecast': '{:,.0f}',
+                'Change': '{:+,.0f}',
+                'Change %': '{:+.1f}%'
+            }),
+            height=400
+        )
+    
+    with tab2:
+        st.subheader("SKU-wise Forecast")
+        
+        # Aggregate by SKU
+        sku_results = utils.aggregate_results(
+            st.session_state.df_nov,
+            st.session_state.predictions,
+            group_by='item_id'
+        )
+        
+        sku_baseline = utils.aggregate_results(
+            st.session_state.df_nov,
+            st.session_state.predictions_baseline,
+            group_by='item_id'
+        )
+        
+        sku_results = sku_results.merge(
+            sku_baseline[['item_id', 'prediction']],
+            on='item_id',
+            suffixes=('', '_baseline')
+        )
+        
+        sku_results['change'] = sku_results['prediction'] - sku_results['prediction_baseline']
+        sku_results['change_pct'] = (sku_results['change'] / sku_results['prediction_baseline']) * 100
+        
+        # Top 10 SKUs chart
+        top_skus = sku_results.nlargest(10, 'prediction')
+        
+        fig_skus = go.Figure()
+        fig_skus.add_trace(go.Bar(
+            y=top_skus['item_name'],
+            x=top_skus['prediction_baseline'],
+            name='Baseline',
+            orientation='h',
+            marker_color='lightgreen'
+        ))
+        fig_skus.add_trace(go.Bar(
+            y=top_skus['item_name'],
+            x=top_skus['prediction'],
+            name='Updated Forecast',
+            orientation='h',
+            marker_color='darkgreen'
+        ))
+        
+        fig_skus.update_layout(
+            title="Top 10 SKUs by Forecast Volume",
+            xaxis_title="Forecasted Quantity",
+            yaxis_title="SKU",
+            barmode='group',
+            height=600
+        )
+        st.plotly_chart(fig_skus, use_container_width=True)
+        
+        # SKU table
+        st.subheader("All SKUs - Detailed View")
+        sku_display = sku_results[['item_name', 'prediction_baseline', 'prediction', 
+                                   'change', 'change_pct']].sort_values('prediction', ascending=False)
+        sku_display.columns = ['SKU Name', 'Baseline', 'Updated Forecast', 'Change', 'Change %']
+        
+        st.dataframe(
+            sku_display.style.format({
+                'Baseline': '{:,.0f}',
+                'Updated Forecast': '{:,.0f}',
+                'Change': '{:+,.0f}',
+                'Change %': '{:+.1f}%'
+            }),
+            height=400
+        )
+    
+    with tab3:
+        st.subheader("Key Forecast Drivers")
+        
+        # Feature importance
+        top_features = st.session_state.feature_importance.head(20)
+        
+        fig_importance = px.bar(
+            top_features,
+            x='importance',
+            y='feature',
+            orientation='h',
+            title="Top 20 Features by Importance",
+            labels={'importance': 'Importance Score', 'feature': 'Feature'}
+        )
+        fig_importance.update_layout(height=600)
+        st.plotly_chart(fig_importance, use_container_width=True)
+        
+        # Input impact summary
+        st.subheader("Input Impact Summary")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.info(f"""
+            **Discount Change:** {discount_change:+d}%
+            
+            Expected to impact:
+            - Own discount levels
+            - Competitive pricing position
+            - Number of promotional days
+            """)
+        
+        with col2:
+            st.info(f"""
+            **Budget Change:** {budget_change:+d}%
+            
+            Expected to impact:
+            - Marketing impressions
+            - Direct/indirect conversions
+            - Overall brand visibility
+            """)
+    
+    with tab4:
+        st.subheader("Detailed Forecast Data")
+        
+        # Prepare detailed dataframe
+        detailed_df = st.session_state.df_nov[['city_norm', 'item_id', 'item_name']].copy()
+        detailed_df['baseline_forecast'] = st.session_state.predictions_baseline['prediction']
+        detailed_df['updated_forecast'] = st.session_state.predictions['prediction']
+        detailed_df['change'] = detailed_df['updated_forecast'] - detailed_df['baseline_forecast']
+        detailed_df['ci_95_lower'] = st.session_state.predictions['ci_95_lower']
+        detailed_df['ci_95_upper'] = st.session_state.predictions['ci_95_upper']
+        
+        # City and SKU filters
+        col1, col2 = st.columns(2)
+        with col1:
+            filter_cities = st.multiselect(
+                "Filter Cities",
+                options=sorted(detailed_df['city_norm'].unique()),
+                default=None
+            )
+        with col2:
+            filter_skus = st.multiselect(
+                "Filter SKUs",
+                options=sorted(detailed_df['item_name'].unique()),
+                default=None
+            )
+        
+        # Apply filters
+        if filter_cities:
+            detailed_df = detailed_df[detailed_df['city_norm'].isin(filter_cities)]
+        if filter_skus:
+            detailed_df = detailed_df[detailed_df['item_name'].isin(filter_skus)]
+        
+        # Display table
+        st.dataframe(
+            detailed_df.style.format({
+                'baseline_forecast': '{:.0f}',
+                'updated_forecast': '{:.0f}',
+                'change': '{:+.0f}',
+                'ci_95_lower': '{:.0f}',
+                'ci_95_upper': '{:.0f}'
+            }),
+            height=500
+        )
+        
+        # Download button
+        csv = detailed_df.to_csv(index=False)
+        st.download_button(
+            label="📥 Download Detailed Forecast",
+            data=csv,
+            file_name="november_forecast_detailed.csv",
+            mime="text/csv"
+        )
+
+
+# Footer
+st.markdown("---")
+st.caption("Sales Forecasting Dashboard | Powered by XGBoost & Streamlit")
