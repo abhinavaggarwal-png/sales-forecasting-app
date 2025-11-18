@@ -16,25 +16,84 @@ st.set_page_config(
 
 # Custom CSS
 st.markdown("""
-    <style>
-    .main-header {
-        font-size: 2.5rem;
-        font-weight: bold;
-        color: #1f77b4;
-        text-align: center;
-        padding: 1rem 0;
-    }
-    .metric-card {
-        background-color: #f0f2f6;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        text-align: center;
-    }
+        <style>
+    /* Force visible text in all modes */
     .stMetric {
-        background-color: #ffffff;
+        background-color: rgba(240, 242, 246, 0.8) !important;
         padding: 1rem;
         border-radius: 0.5rem;
         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        border: 1px solid rgba(128,128,128,0.2);
+    }
+    
+    [data-testid="stMetricLabel"] {
+        color: #1f1f1f !important;
+        font-weight: 600;
+    }
+    
+    [data-testid="stMetricValue"] {
+        color: #0e1117 !important;
+        font-weight: 700;
+    }
+    
+    [data-testid="stMetricDelta"] {
+        color: #09ab3b !important;
+    }
+    
+    /* Dark mode - use darker cards with white text */
+    [data-theme="dark"] .stMetric,
+    @media (prefers-color-scheme: dark) {
+        .stMetric {
+            background-color: rgba(38, 39, 48, 0.95) !important;
+            border: 1px solid rgba(255,255,255,0.15) !important;
+        }
+        
+        [data-testid="stMetricLabel"] {
+            color: #fafafa !important;
+        }
+        
+        [data-testid="stMetricValue"] {
+            color: #ffffff !important;
+        }
+        
+        [data-testid="stMetricDelta"] {
+            color: #21c354 !important;
+        }
+    }
+    
+    /* Sidebar in dark mode */
+    [data-theme="dark"] [data-testid="stSidebar"],
+    @media (prefers-color-scheme: dark) {
+        [data-testid="stSidebar"] {
+            background-color: #0e1117 !important;
+        }
+        
+        [data-testid="stSidebar"] .stMarkdown,
+        [data-testid="stSidebar"] .stText {
+            color: #fafafa !important;
+        }
+    }
+    
+    /* Make CI metric values smaller to fit */
+    [data-testid="column"]:nth-child(3) .stMetric [data-testid="stMetricValue"],
+    [data-testid="column"]:nth-child(4) .stMetric [data-testid="stMetricValue"],
+    [data-testid="column"]:nth-child(5) .stMetric [data-testid="stMetricValue"] {
+        font-size: 1.2rem !important;
+    }
+    
+    /* Better mobile visibility */
+    @media (max-width: 768px) {
+        .stMetric {
+            padding: 0.75rem;
+        }
+        
+        [data-testid="stMetricLabel"] {
+            font-size: 0.9rem !important;
+        }
+        
+        [data-testid="stMetricValue"] {
+            font-size: 1.3rem !important;
+        }
     }
     </style>
     """, unsafe_allow_html=True)
