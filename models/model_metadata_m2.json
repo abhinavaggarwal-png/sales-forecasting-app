@@ -1,0 +1,12 @@
+{
+  "model_version": "1.0",
+  "forecast_horizon": "M+2",
+  "training_date": "2025-11-26 12:07:14",
+  "n_features": 29,
+  "city_sku_wape": 18.90835963339253,
+  "tcpl_sku_wape": 15.194258977701363,
+  "validation_month": "2025-10",
+  "data_available_till": "2025-08",
+  "training_months": "Sep 2024 - Aug 2025",
+  "lag_structure": "lag_1=2m_back, lag_2=3m_back"
+}

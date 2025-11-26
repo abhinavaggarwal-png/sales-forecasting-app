@@ -1,0 +1,9 @@
+{
+  "model_version": "1.0",
+  "training_date": "2025-11-26 13:40:50",
+  "n_features": 28,
+  "city_sku_wape": 16.00724985356937,
+  "tcpl_sku_wape": 12.829679775644767,
+  "training_months": "Sep 2024 - Sep 2025",
+  "validation_month": "2025-10"
+}
